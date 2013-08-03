@@ -77,15 +77,13 @@ def parseresult(result=None):
     lines = result.strip().split('\n')
     motifs = {}
     state = 0
-    motif_name = ''
+    motif = None
     for line in lines:
         if state == 0:
             motif_match = match_motif_properties(line)
             if not motif_match:
                 continue
-            motif_name = motif_match.group(1)
-            motif = Motif(motif_name,'',motif_match.group(2),motif_match.group(3),motif_match.group(4), float(motif_match.group(5)) )
-            motifs[motif_name] = motif
+            motif = Motif(motif_match.group(1),'',motif_match.group(2),motif_match.group(3),motif_match.group(4), float(motif_match.group(5)) )
             state = 1
         elif state == 1:
             motif_regex_header = match_motif_regex_header(line)
@@ -96,11 +94,14 @@ def parseresult(result=None):
             motif_regex_match = match_motif_regex(line)
             if not motif_regex_match:
                 continue
-            motifs[motif_name].regex = motif_regex_match.group(1)
-            motif_name = ''
+            motif.regex = motif_regex_match.group(1)
+            motifs[motif.regex] = motif
+            motif = None
             state = 0
-            
     return motifs
+    
+def merge_motifs(motif1, motif2):
+    return dict(motif1.items() + motif2.items())
 
 def print_motifs(motifs):
     for m in motifs:
@@ -131,6 +132,9 @@ def read_sequence_data(filename):
     filename = os.path.abspath(os.path.join(env._env['DATA_PATH'] , filename) )
     with open(filename, 'r') as csvfile:
         seqreader = csv.reader(csvfile, delimiter=',', quotechar="\"")
+        header = seqreader.next()
+        if not data:
+            data.append(header)
         for row in seqreader:
             data.append(row)
 
@@ -142,7 +146,13 @@ def print_current_data():
 
 def delete_current_data():
     global data
-    data = []           
+    data = []
+
+# deletes feature vectors from data
+def reset_current_data():
+    for row in data:
+        del row[2:]
+           
 
 def shuffle_current_data():
     global data
@@ -168,9 +178,9 @@ def slice_current_data(begin=None, end=None):
 
     
 def feature_vector_generator(motifs, min_e_value = 0):
-    print "-- Generating features"    
+    print "-- Generating features" 
     for m in motifs:
-        if (motifs[m].evalue >= min_e_value):
+        if (motifs[m].evalue >= float(min_e_value) ):
             check_motif_in_seq_file(motifs[m].regex,data)
 
 def save_feature_vectors(filename = "features.csv" ):
