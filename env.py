@@ -1,4 +1,4 @@
-import sys, os, tempfile
+import os
 
 global _env
 

@@ -11,7 +11,7 @@ global data, memeoutput
 data = []
 memeoutput = None
 
-
+# converts csv file into fasta format
 def csvToFasta(infile, outfile):
     print "-- Extracting data from: " + infile
    
