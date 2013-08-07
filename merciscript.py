@@ -4,7 +4,6 @@ import shlex
 from subprocess import Popen, PIPE
 from random import shuffle
 import re
-import itertools
 
 global data, output
 
@@ -30,13 +29,17 @@ def csvToFasta(infile, outfile):
     
     print "-- Fatsa file is created: " + outfile
     
-# run meme to collect motif data
-def runmeme(datafile, mod="zoops", minw=4, maxw=4, nmotifs=100, minsites=10, maxsites=100):
+# run merci to collect motif data
+def runmerci(positivefile, negativefile, topK=100, length=5):
     global output    
-    cmd = env._env['MEME_EXE_PATH'] + " " + env._env['DATA_PATH']    
-    cmd += "/{} -text -mod {}".format(datafile, mod)
-    cmd += " -minw {} -maxw {}".format(minw, maxw) 
-    cmd += " -nmotifs {} -minsites {} -maxsites {} ".format(nmotifs, minsites, maxsites)     
+   
+    cmd = "perl " + env._env['MERCI_EXE_PATH'] + " "  
+    cmd += "-p " +env._env['MERCI_DATA_PATH'] + "/{} ".format(positivefile)
+    cmd += "-n " +env._env['MERCI_DATA_PATH'] + "/{} ".format(negativefile)
+    cmd += "-k {} -l {} ".format(topK, length) 
+    cmd += "-c " + env._env['MERCI_CLASSIFICATION_PATH'] + " " 
+    cmd += "-o " + env._env['MERCI_OUTPUT_PATH']
+    
     print "-- Running command: "    
     print cmd    
     args = shlex.split(cmd)
@@ -56,55 +59,71 @@ class Motif:
     def __str__(self):
         return self.name + " : " + self.regex + " :w " + str(self.width) + " :s " + str(self.sites) + " :e " + str(self.evalue) + " :llr " + str(self.llr) 
 
-def match_motif_properties(string):
-    return re.match(r"(MOTIF\s+\d+)\s+width\s+=\s+(\d+)\s+sites\s+=\s+(\d+)\s+llr\s+=\s+(\d+)\s+E-value\s+=\s+(\d+\.\d+e\+\d+).*", string, re.IGNORECASE)
-
-def match_motif_regex_header(string):
-    return re.match(r"\s*(Motif\s+\d+)\s+regular\s+expression",string,re.IGNORECASE)
 
 def match_motif_regex(string):
-    return re.match(r"([AGTC\[\]]+)\s*",string,re.IGNORECASE)
+    return re.match(r"\s*\*\s+motif:\s+([AGTC\[\] ]+).*",string,re.IGNORECASE)
 
-# extract motif data from meme results    
+def match_motif_regex_header(string):
+    return re.match(r"\s*(Motifs:)\s*",string,re.IGNORECASE)
+
+    
+def match_top_motif_regex(string):
+    return re.match(r"\s*([AGTC\[\] ]+)\s*",string,re.IGNORECASE)
+ 
+
+# extract motif data from merci results    
 def parseresult(result=None):
+    global output
     if result is None:
         if output is None:
             raise Exception("You should run meme to get output data, then parse result")
         else:
             result = output
             
-    lines = result.strip().split('\n')
-    motifs = {}
-    state = 0
+    lines = result.strip().split('\n') 
+    motifs = []
     motif = None
     for line in lines:
-        if state == 0:
-            motif_match = match_motif_properties(line)
-            if not motif_match:
-                continue
-            motif = Motif(motif_match.group(1),'',motif_match.group(2),motif_match.group(3),motif_match.group(4), float(motif_match.group(5)) )
-            state = 1
-        elif state == 1:
-            motif_regex_header = match_motif_regex_header(line)
-            if not motif_regex_header:
-                continue
-            state = 2
-        elif state == 2:
-            motif_regex_match = match_motif_regex(line)
-            if not motif_regex_match:
-                continue
-            motif.regex = motif_regex_match.group(1)
-            motifs[motif.regex] = motif
-            motif = None
-            state = 0
+        motif_regex_match = match_motif_regex(line)
+        if not motif_regex_match:
+            continue
+        motif = Motif()
+        motif.regex = motif_regex_match.group(1).replace(" ", "")
+        motifs.append(motif)
+        motif = None
     return motifs
     
+# read output data from merci
+def parseoutputfile():
+    resultfile =  env._env['MERCI_OUTPUT_PATH']
+    motifs = []
+    motif = None
+    state = 0;
+    with open(resultfile, 'r') as f:
+        for line in f:
+            if state == 0:
+                motif_match = match_motif_regex_header(line)
+                if not motif_match:
+                    continue
+                state = 1
+            elif state == 1:
+                motif_regex_match = match_top_motif_regex(line)
+                if not motif_regex_match:
+                    continue
+                motif = Motif()
+                motif.regex = motif_regex_match.group(1).replace(" ", "")
+                motifs.append(motif)
+                motif = None
+    return motifs 
+    
+    
+    
 def merge_motifs(motif1, motif2):
-    return dict(motif1.items() + motif2.items())
+    return motif1 + motif2
 
 def print_motifs(motifs):
     for m in motifs:
-        print motifs[m].__str__()    
+        print m.__str__()    
     
 def match_motif_with_seq(motif_regex, sequence):
     motif_regex = ".*" + motif_regex + ".*"
@@ -128,7 +147,7 @@ def check_motif_in_seq_file(motif_regex, sequences):
 # if you do not delete current data, it appends each file to the end 
 def read_sequence_data(filename):
     print "-- Reading sequence data from: " + filename
-    filename = os.path.abspath(os.path.join(env._env['DATA_PATH'] , filename) )
+    filename = os.path.abspath(os.path.join(env._env['MERCI_DATA_PATH'] , filename) )
     with open(filename, 'r') as csvfile:
         seqreader = csv.reader(csvfile, delimiter=',', quotechar="\"")
         header = seqreader.next()
@@ -176,27 +195,18 @@ def slice_current_data(begin=None, end=None):
         data = data[begin:end]
 
     
-def feature_vector_generator(motifs, min_e_value = 0):
+def feature_vector_generator(motifs):
     print "-- Generating features" 
     for m in motifs:
-        if (motifs[m].evalue >= float(min_e_value) ):
-            check_motif_in_seq_file(motifs[m].regex,data)
+        check_motif_in_seq_file(m.regex,data)
 
 def save_feature_vectors(filename = "features.csv" ):
-    filename = os.path.abspath(os.path.join(env._env['DATA_PATH'] , filename) )
+    filename = os.path.abspath(os.path.join(env._env['MERCI_DATA_PATH'] , filename) )
     outf = open(filename, 'w')
     for row in data:
         outf.write( ",".join(row) + '\n')    
     outf.close()
 
-# create custom pairs from alphabet        
-def create_pairs(alphabet, pair_size):
-    custom_motifs = {} 
-    for p in itertools.product(alphabet, repeat=pair_size):
-        custom_regex = ''.join(p)
-        custom_motifs[custom_regex] = Motif(custom_regex,custom_regex)
-        
-    return custom_motifs
             
     
 
