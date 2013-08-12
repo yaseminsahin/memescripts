@@ -30,13 +30,15 @@ def csvToFasta(infile, outfile):
     print "-- Fatsa file is created: " + outfile
     
 # run merci to collect motif data
-def runmerci(positivefile, negativefile, topK=100, length=5):
+def runmerci(positivefile, negativefile, topK=50, length=5, fp=20, fn=10, g=2, gl=2):
     global output    
    
     cmd = "perl " + env._env['MERCI_EXE_PATH'] + " "  
     cmd += "-p " +env._env['MERCI_DATA_PATH'] + "/{} ".format(positivefile)
     cmd += "-n " +env._env['MERCI_DATA_PATH'] + "/{} ".format(negativefile)
-    cmd += "-k {} -l {} ".format(topK, length) 
+    cmd += "-k {} -l {} ".format(topK, length)
+    cmd += "-fp {} -fn {} ".format(fp, fn)
+    cmd += "-g {} -gl {} ".format(g, gl)
     cmd += "-c " + env._env['MERCI_CLASSIFICATION_PATH'] + " " 
     cmd += "-o " + env._env['MERCI_OUTPUT_PATH']
     
@@ -61,22 +63,22 @@ class Motif:
 
 
 def match_motif_regex(string):
-    return re.match(r"\s*\*\s+motif:\s+([AGTC\[\] ]+).*",string,re.IGNORECASE)
+    return re.match(r"\s*\*\s+motif:\s+([AGTC\[\] p]+).*",string,re.IGNORECASE)
 
 def match_motif_regex_header(string):
     return re.match(r"\s*(Motifs:)\s*",string,re.IGNORECASE)
 
-    
 def match_top_motif_regex(string):
-    return re.match(r"\s*([AGTC\[\] ]+)\s*",string,re.IGNORECASE)
+    return re.match(r"\s*([AGTC\[\] p]+)\s*",string,re.IGNORECASE)
  
-
+def match_gl_param_regex(string):
+    return re.match(r"\s+-gl\s+(?P<param_gl>\d+)\s*", string, re.IGNORECASE)
 # extract motif data from merci results    
 def parseresult(result=None):
     global output
     if result is None:
         if output is None:
-            raise Exception("You should run meme to get output data, then parse result")
+            raise Exception("You should run merci to get output data, then parse result")
         else:
             result = output
             
@@ -99,20 +101,38 @@ def parseoutputfile():
     motifs = []
     motif = None
     state = 0;
+    gl = 0;
     with open(resultfile, 'r') as f:
         for line in f:
             if state == 0:
+                param_match = match_gl_param_regex(line)
+                if not param_match:
+                    continue
+                gl = param_match.group('param_gl')
+                state = 1
+            if state == 1:
                 motif_match = match_motif_regex_header(line)
                 if not motif_match:
                     continue
-                state = 1
-            elif state == 1:
+                state = 2
+            elif state == 2:
                 motif_regex_match = match_top_motif_regex(line)
                 if not motif_regex_match:
                     continue
                 motif = Motif()
-                motif.regex = motif_regex_match.group(1).replace(" ", "")
+                motif.regex = ''
+                motif.name = motif_regex_match.group(1).replace(" ", "")
+                gaps = motif_regex_match.group(1).split()
+
+                for ch in gaps:
+                    if ch == 'gap':
+                        motif.regex += "([AGTC]){0," + str(gl) + "}"
+                    else:
+                        motif.regex += ch
+                
                 motifs.append(motif)
+                #print motif.name
+                #print motif.regex
                 motif = None
     return motifs 
     
@@ -131,8 +151,6 @@ def match_motif_with_seq(motif_regex, sequence):
     return re.match(pattern, sequence)
 
 def check_motif_in_seq_file(motif_regex, sequences):
-
-    sequences[0].append(motif_regex)
 
     for row in sequences[1:]:
         regex_match = match_motif_with_seq(motif_regex,row[1])
@@ -198,6 +216,7 @@ def slice_current_data(begin=None, end=None):
 def feature_vector_generator(motifs):
     print "-- Generating features" 
     for m in motifs:
+        data[0].append(m.name)
         check_motif_in_seq_file(m.regex,data)
 
 def save_feature_vectors(filename = "features.csv" ):
