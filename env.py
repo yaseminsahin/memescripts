@@ -22,8 +22,11 @@ _env['MERCI_EXE_PATH'] = os.path.abspath(
 _env['MERCI_CLASSIFICATION_PATH'] = os.path.abspath(
     os.path.join(_env['MERCI_PATH'] , 'classification') )
     
-_env['MERCI_OUTPUT_PATH'] = os.path.abspath(
+_env['MERCI_OUTPUT_FILE'] = os.path.abspath(
     os.path.join(_env['MERCI_DATA_PATH'] , 'merciresult') )
+    
+_env['MERCI_OCCURENCE_OUTPUT_FILE'] = os.path.abspath(
+    os.path.join(_env['MERCI_DATA_PATH'] , 'merciresult.occurrences') )
 
 
 

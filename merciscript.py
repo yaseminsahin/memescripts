@@ -5,10 +5,12 @@ from subprocess import Popen, PIPE
 from random import shuffle
 import re
 
-global data, output
+global data, output, gl
 
 data = []
 output = None
+gap_length = 0
+
 
 # converts csv file into fasta format
 def csvToFasta(infile, outfile):
@@ -30,8 +32,10 @@ def csvToFasta(infile, outfile):
     print "-- Fatsa file is created: " + outfile
     
 # run merci to collect motif data
-def runmerci(positivefile, negativefile, topK=50, length=5, fp=20, fn=10, g=2, gl=2):
-    global output    
+def runmerci(positivefile, negativefile, topK='ALL', length=5, fp=10, fn=10, g=1, gl=1):
+    global output  
+    global gap_length
+    gap_length = gl
    
     cmd = "perl " + env._env['MERCI_EXE_PATH'] + " "  
     cmd += "-p " +env._env['MERCI_DATA_PATH'] + "/{} ".format(positivefile)
@@ -40,7 +44,7 @@ def runmerci(positivefile, negativefile, topK=50, length=5, fp=20, fn=10, g=2, g
     cmd += "-fp {} -fn {} ".format(fp, fn)
     cmd += "-g {} -gl {} ".format(g, gl)
     cmd += "-c " + env._env['MERCI_CLASSIFICATION_PATH'] + " " 
-    cmd += "-o " + env._env['MERCI_OUTPUT_PATH']
+    cmd += "-o " + env._env['MERCI_OUTPUT_FILE']
     
     print "-- Running command: "    
     print cmd    
@@ -58,12 +62,22 @@ class Motif:
         self.sites = sites
         self.llr = llr
         self.evalue = evalue
+        self.num_of_positive_occurence = 0
+        self.num_of_negative_occurence = 0
     def __str__(self):
         return self.name + " : " + self.regex + " :w " + str(self.width) + " :s " + str(self.sites) + " :e " + str(self.evalue) + " :llr " + str(self.llr) 
 
+    def to_string(self):
+        return self.name + " --> " + self.regex + " - positive occ: " + self.num_of_positive_occurence + " negative occ: " + self.num_of_negative_occurence
 
 def match_motif_regex(string):
-    return re.match(r"\s*\*\s+motif:\s+([AGTC\[\] p]+).*",string,re.IGNORECASE)
+    return re.match(r"\s*MOTIF:\s+([AGTC\[\] p]+)\s*",string,re.IGNORECASE)
+    
+def match_num_of_positive_occurence(string):
+    return re.match(r"(\d+) positive sequences contain the motif\s*", string, re.IGNORECASE)    
+
+def match_num_of_negative_occurence(string):
+    return re.match(r"(\d+) negative sequences contain the motif\s*", string, re.IGNORECASE)    
 
 def match_motif_regex_header(string):
     return re.match(r"\s*(Motifs:)\s*",string,re.IGNORECASE)
@@ -96,8 +110,49 @@ def parseresult(result=None):
     return motifs
     
 # read output data from merci
-def parseoutputfile():
-    resultfile =  env._env['MERCI_OUTPUT_PATH']
+def parse_occurence_file():
+    global gap_length
+    resultfile =  env._env['MERCI_OCCURENCE_OUTPUT_FILE']
+    motifs = []
+    motif = None
+    state = 0;
+ 
+    with open(resultfile, 'r') as f:
+        for line in f:
+            if state == 0:
+                motif_regex_match = match_motif_regex(line)
+                if not motif_regex_match:
+                    continue
+                motif = Motif()
+                motif.regex = ''
+                motif.name = motif_regex_match.group(1).replace(" ", "")
+                gaps = motif_regex_match.group(1).split()
+
+                for ch in gaps:
+                    if ch == 'gap':
+                        motif.regex += "([AGTC]){0," + str(gap_length) + "}"
+                    else:
+                        motif.regex += ch
+                
+                motifs.append(motif)
+                state = 1
+            if state == 1:
+                num_of_positive_match = match_num_of_positive_occurence(line)
+                if not num_of_positive_match:
+                    continue
+                motif.num_of_positive_occurence = num_of_positive_match.group(1)
+                state = 2
+            elif state == 2:
+                num_of_negative_match = match_num_of_negative_occurence(line)
+                if not num_of_negative_match:
+                    continue
+                motif.num_of_negative_occurence = num_of_negative_match.group(1)
+                state = 0
+    return motifs 
+    
+# read output data from merci
+def parse_output_file():
+    resultfile =  env._env['MERCI_OUTPUT_FILE']
     motifs = []
     motif = None
     state = 0;
@@ -131,8 +186,6 @@ def parseoutputfile():
                         motif.regex += ch
                 
                 motifs.append(motif)
-                #print motif.name
-                #print motif.regex
                 motif = None
     return motifs 
     
@@ -143,7 +196,8 @@ def merge_motifs(motif1, motif2):
 
 def print_motifs(motifs):
     for m in motifs:
-        print m.__str__()    
+        print m.to_string()
+        #print m.__str__()    
     
 def match_motif_with_seq(motif_regex, sequence):
     motif_regex = ".*" + motif_regex + ".*"
@@ -225,6 +279,14 @@ def save_feature_vectors(filename = "features.csv" ):
     for row in data:
         outf.write( ",".join(row) + '\n')    
     outf.close()
+    
+def write_occurences_to_file(motifs, filename="occurences.csv"):
+    filename = os.path.abspath(os.path.join(env._env['MERCI_DATA_PATH'] , filename) )
+    outf = open(filename, 'w')
+    for m in motifs:
+        outf.write(m.name + ',' + str(m.num_of_positive_occurence) + ',' + str(m.num_of_negative_occurence) + '\n')    
+    outf.close()
+
 
             
     
