@@ -3,7 +3,6 @@ import csv
 from random import shuffle
 import operator
 from itertools import imap
-from random import randint
 
 global data, distance_matrix
 
@@ -12,6 +11,7 @@ distance_matrix = {}
 medoids = []
 clusters = []
 total_cost = 0
+c_data = {}
 
 class Cluster:
     def __init__(self):
@@ -38,14 +38,30 @@ class Cluster:
             curr_cost = 0
             for y in self.items:
                 curr_cost += distance_matrix[x][y]
-            print "------> new cost : %s (%s) " % (x,curr_cost)
+            # print "------> new cost : %s (%s) " % (x,curr_cost)
             if curr_cost < self.cost:
                 print "medoid changing: %s (%s) -> %s (%s)" % (self.medoid, self.cost, x, curr_cost)
                 self.medoid = x
                 self.cost = curr_cost
         
 
-        
+class CResult:
+    def __init__(self, se, sa, sp, le, la, lp):
+        self.svm_error = se        
+        self.svm_actual = sa
+        self.svm_predicted = sp
+        self.lgr_error = le
+        self.lgr_actual = la
+        self.lgr_predicted = lp
+
+def read_classification_data(filename):
+    print "-- Reading classification data from: " + filename
+    filename = os.path.abspath(os.path.join(env._env['DATA_PATH'] , filename) )
+    with open(filename, 'r') as csvfile:
+        seqreader = csv.reader(csvfile, delimiter=',', quotechar="\"")
+        for row in seqreader:
+            seq = row[0]
+            c_data[seq] = CResult(row[1].strip(),row[2],row[3],row[4].strip(),row[5],row[6])
         
 def run_k_medoids(data, k = 10):
     global clusters
@@ -105,18 +121,26 @@ def get_total_cost():
 
 def print_clusters():
     global clusters
+    global c_data
         
     for i,c in enumerate(clusters):
         print "%s. cluster:" % (i+1)
         print "\tmedoid: %s" % c.medoid
         print "\tcost  : %s" % c.cost
         print "\titems : %s" % len(c.items)
+        err_count = 0
         for i in c.items:
-            print "\t%s" % i
+            if c_data[i].lgr_error != '':
+                err_count += 1
+            print "\t%s %s %s %s" % (i, c_data[i].lgr_error, c_data[i].lgr_actual, c_data[i].lgr_predicted)
+        correct = len(c.items) - err_count
+        print "\n\t%s correctly classifed" % str(correct)
+        print "\t%s misclassified\n" % str(err_count)
         print "\n--------------------------------------\n"
 
 def save_clusters(filename = "clusters.out"):
     global clusters
+    global c_data
     filename = os.path.abspath(os.path.join(env._env['DATA_PATH'] , filename) )
     outf = open(filename, 'w')
     for i,c in enumerate(clusters):
@@ -124,8 +148,18 @@ def save_clusters(filename = "clusters.out"):
         outf.write( "\tmedoid:" + c.medoid  + "\n")
         outf.write( "\tcost  : " + str(c.cost)  + "\n")
         outf.write( "\titems : " + str(len(c.items))  + "\n")
+        err_count = 0
         for i in c.items:
-            outf.write( "\t" + i + "\n")
+            if c_data[i].lgr_error != '':
+                err_count += 1
+            outf.write( "\t" + i + " ")
+            outf.write( c_data[i].lgr_error + " ")
+            outf.write( c_data[i].lgr_actual + " ")
+            outf.write( c_data[i].lgr_predicted + " ")
+            outf.write("\n")
+        correct = len(c.items) - err_count
+        outf.write( "\n\t" + str(correct) + " correctly classifed\n")
+        outf.write( "\t" + str(err_count) + " misclassified\n")
         outf.write( "\n--------------------------------------\n")   
     outf.close()    
         
